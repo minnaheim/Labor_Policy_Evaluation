@@ -1,0 +1,259 @@
+---
+title: "Replication4_Hund_Heim"
+author: "Amelia Hund & Minna Heim"
+date: "2023-04-18"
+output: html_document
+---
+
+```{r,  include=FALSE}
+### Preparations
+
+#install.packages("pacman")
+#pacman::p_load("tidyverse", "broom", "lmtest", "sandwich", "rdrobust", update=TRUE)
+#install.packages("rdrobust")
+
+# Load packages
+library(tidyverse) # Data manipulation
+library(broom)     # Modeling output
+library(sandwich)  # Cluster-robust standard errors for regression
+library(lmtest) 
+library(rdrobust)  # Toolkit for non-parametric rd-estimation
+library(kableExtra)
+
+# Load data
+setwd("~/R/Labour Economics")
+almond <- read_csv("Almond_Etal_QJE_2010_data.csv", show_col_types = FALSE)
+summary(almond)
+
+```
+
+
+# Question 1: Create the necessary variables
+
+```{r}
+view(almond)
+```
+
+
+## a) The running variable (centered around the cutoff)
+
+```{r}
+Diff_weight <- (almond$dbirwt - 1500)
+
+#+/- 85 g from cutoff (bandwidth of 85g)
+
+head(Diff_weight)
+```
+
+
+## b) The VLBW indicator
+
+```{r}
+VLBW <- ifelse(almond$dbirwt < 1500, 1 , 0)
+
+summary(VLBW)
+```
+
+
+## c) The interaction term
+
+```{r}
+interaction <- Diff_weight * VLBW 
+
+summary(interaction)
+```
+
+
+# Question 2: Graphical analysis
+
+## a) Density graph
+
+```{r}
+almond <- cbind(almond, Diff_weight, VLBW, interaction)
+
+ggplot(almond, aes(x = Diff_weight)) + 
+  geom_histogram(aes(y = ..density..), binwidth = 1) + 
+  labs( title = "Density of Running Variable around Cut-off (1500g)", x = "Difference in Weight to Cut-off")
+
+```
+
+### replicate Figure 1 of Paper:
+
+```{r}
+ggplot(almond, aes(x = dbirwt)) + 
+  geom_histogram( binwidth = 1) + 
+  labs( title = "Frequency of births by gram", x = "Birthweight in g", y = "Frequency")
+
+```
+The histogram of births between 1415 and 1585g in the nationwide sample has several notable characteristics: First, there are pronounced reporting heaps at the gram equivalents of ounce intervals. Although there are also reporting heaps at "round" gram numbers (such as multiples of 100), these heaps are much smaller than those observed at gram equivalents of ounce intervals. Second, one cannot observe irregular reporting heaps around the 1500-g threshold of interest or the equivalent 0-difference-threshold in the density histogram. This is consistent with women being unable to predict birth weight in advance of birth with the accuracy necessary to move their newborn from just above 1,500g to just below 1,500g. The lack of heaping further suggests that physicians also do not indulge in manipulating reported birth weight so that, for example, more newborns fall below the 1500-g cutoff and justify higher reimbursements. Technically physicians could also have done more complicated manipulations of birth weight consistent with the findings in the above figures. They could have relabeled unobservably sicker newborns weighing just above 1,500g to be labeled as being below 1,500g and symmetrically switched the same number of other newborns weighing just below 1,500g to be labeled as just above 1,500g this could be consistent with the smooth distribution in the above figures. However, as later shown by the authors, this seems highly unlikely given that they show that other covariates are smooth across the cutoff, implying that doctors would not only need to "symmetrically" switch newborns but symmetrically switch newborns who are identical on all of the covariates observed. Therefore, one can assume that switching does not occur. 
+
+This is important because the identifying assumption in RDD is that $E({Y_1}|X)$ and $E({Y_0}|X)$ are continuous at $X = c$. Then the treatment effect can be identified at the threshold as:
+$$E({Y_1}-{Y_0}|X=c) = E({Y_1}|X = c) - E({Y_0}|X = c) = \lim_{x \to c}E(Y|X=x) - \lim_{x \to c}E(Y|X=x)$$
+However, we could not estimate this jump at the threshold and interpret it as causal of continuity is violated. Continuity could be violated if individuals manipulate X, so the birthweight, to get or avoid treatment. This is because those who would precisely influence/chose the score c and below (and hence receive treatment) could be different from those who chose to score just above c. However, as argued above, it is very plausible that any switching by either the mother or the doctors does not occur. 
+
+Continuity could also be violated, however, if other treatments set in at c. Then we could not necessarily say that without treatment, there is no reason that the outcome would jump at the threshold c. With age thresholds this is often violated. 
+
+
+## b) RDD graph
+
+```{r}
+#view(almond)
+almondhetero <- almond %>%
+  group_by(dbirwt) %>%
+  mutate(mortmean = mean(death1year))
+
+almondhetero$VLBW = ifelse(almondhetero$dbirwt < 1500, 1 , 0)
+
+ggplot(data = almondhetero, aes(x = dbirwt, y = mortmean, fill = factor(VLBW))) + 
+  geom_point() +
+  geom_smooth(method = "lm", se = TRUE) +
+  geom_vline(xintercept = 1500) +
+  labs(title = "One-Year Mortality by Birthweight", x="Birthweight", y="expected one-year mortality")
+
+view(almondhetero)
+
+```
+
+
+The above figure reports mean mortality for all infants according to their birthweight. As we can see in the figure there is an inconsistency around the threshold. This can be interpreted as a discontinuity whose importance will be explained in light of the RDD theory. Treatment is not completely randomized but "turns on" when birthweight<c(=1500g), so the birthweight will then be correlated with the treatment outcome, which means that comparing treated and untreated as in a field experiment would not provide causal estimates. However, assuming that there is no other treatment that "turns on" around this point, we can use the discontinuity in $E(Y|X)$ at the cutoff value $X = c$ to estimate the treatment effect since we assume that $E({Y_1}|X)$ and $E({Y_0}|X)$ are (would be ) continuous at X (without treatment). The jump at this border, so at 1500g, is a sign of discontiuity and the only explanation for this discontinuity is the treatment effect (given that no other treatments set in and there was no manipulation which we have discussed in the previous exercise). The aim of RDD is therefore, to estimate this jump at the border. As we can see in the figure above there is indeed a discontinuity: at the 1500g mark the average mortality rate jumps upward. This implies that for babies weighing under 1500g extra treatment does in fact lower the average mentality rate and treating these babies may prove beneficial and prolong their life.
+
+
+# Question 3: RDD estimation
+
+## a) Estimate the RDD model
+
+```{r}
+#"Trying" to show heteroskedasticity
+lm1 <- lm(data = almond, death1year ~ factor(VLBW) + Diff_weight + interaction ) 
+res <- resid(lm1)
+plot(fitted(lm1),res)
+plot(almond$Diff_weight, res,
+     ylab="Residuals", xlab="Difference from Cutoff",
+     main="Residual Plot")
+
+#Estimation of treatment effect:
+lm2 <- lm(data = almond, death1year ~ factor(VLBW) + Diff_weight + interaction ) %>% 
+  coeftest(vcov = vcovCL, cluster = ~ Diff_weight, type = "HC0") 
+
+lm1_t<- tidy(lm2)
+
+lm1_t %>% 
+  kbl (digits= 4) %>% 
+  kable_minimal()
+
+```
+
+Because of the fact that our outcome is either 0 or 1, it is hard/not possible to show the heteroscedasticity of our standard errors. However, estimating heteroscedasticity robust standard errors is always advisable. We would also argue that clustering according to Diff_weight (the running variable) would make sense. Clustered standard errors are often useful when treatment is assigned at the level of a cluster instead of at the individual level. However, when estimating the standard error or confidence interval of our statistical model, classical or even heteroscedasticity-robust standard errors are inappropriate because the babies' mortality rates within the two groups are not independently distributed. Instead, babies with lower birthweights have especially high mortality rates (regardless of whether they receive the experimental treatment) while students in classes with higher birthweight have lower mortality rates.
+
+## b) Interpret the results
+
+The coefficient estimate for the running variable (the difference of the brithweight to the cutoff value of 1500g) as well as the coefficient estimate for the treatment indicator VLBW are statistically significant according to the p-values of 0.0055 (1%-significance-level) and 0.0453 (5%-significance-level) respectively. 
+
+First of all this indicates, that the 'marginal returns to the diff_weight' or also just birthweight are -0.0002. This implies that there is a causal relationship between the birthweight and the one-year-mortality-rate: with increasing birthweight (or with increasing positive distance from 1500g), the one-year-mortality rate decreases. Including this coefficient in our regression allows us to control for endogeneity.
+
+Second of all, and even more importantly, with perfect compliance the coefficient estimate of VLBW indicates that there is indeed an average treatment effect of -0.0095 (at c = 1500) and thus, with treatment the one-year-mortality rate (at least of those babies weighing (<)=1500g) is decreased. Considering that the expected mortality rate is always roughly 0.06 so 6%, an almost 0.01 (1%) decrease is rather significant.
+
+
+```{r}
+#without unobserved values to better see estimated treatment effect: 
+
+#We first predict the one-year-mortality based on our RDD:
+predfit1 <- predict(lm1, almond)
+
+#We set colors for the graph:
+palette( c( adjustcolor( "steelblue", alpha.f=0.3), adjustcolor( "darkred", alpha.f=0.3)  ) )
+
+#To differently color the treatment and control group we need to create a new Treatment variable that where the Control group = 2
+almond$VLBW2 <- ifelse( almond$VLBW == 0, 2, 1 )
+Diff_weight
+
+# Plot our predicted values
+plot( Diff_weight, predfit1,
+      col= almond$VLBW2, 
+      xlab="Birthweight centered", 
+      ylab="One-year-mortality")
+
+# Plot a line at the cutoff point
+abline( v=0, col="red", lwd=2, lty=2 )
+
+
+```
+
+
+# Question 4: Robustness checks
+
+## a) 25 grams BW
+
+```{r}
+
+almondbust <- almond %>%
+  filter(abs(Diff_weight) <= 25)
+
+lm2 <- lm(data = almondbust, death1year ~ factor(VLBW) + Diff_weight + interaction ) %>%
+  coeftest(vcov = vcovCL, cluster = ~ Diff_weight, type = "HC0")
+
+lm2_t<- tidy(lm2)
+
+lm2_t %>% 
+  kbl (digits= 4) %>% 
+  kable_minimal()
+
+
+```
+
+RDD provides limited external validity as results are only generalization around the cut-off, which is why provision of a service might make more or less difference to people who are further away from the cut-off point. Therefore, reducing the bandwidth of the RDD design will eliminate bias but will increase the variance due to less data included. We can see that with this smaller bandwidth the coefficient estimate for the treatment dummy VLBW has increased (or further increased) to -0.0250, which indicates a stronger treatment effect when compared to exercise 3a and is still statistically significant at the 1%-level. However, the standard error has increased from 0.0048 to 0.0090.
+
+
+## b) Quadratic functional form
+
+```{r}
+
+almondbust2 <- almond %>%
+  mutate(Diff_weightsq = Diff_weight^2) %>%
+  mutate(interactionsq = Diff_weightsq * VLBW )
+
+lm3 <- lm(data = almondbust2, death1year ~ factor(VLBW) + Diff_weightsq + interactionsq + Diff_weight + interaction) %>%
+  coeftest(vcov = vcovCL, cluster = ~ Diff_weight, type = "HC0")
+
+lm3_t<- tidy(lm3)
+
+lm3_t %>% 
+  kbl (digits= 4) %>% 
+  kable_minimal()
+```
+
+The major problem in analyzing data from the RD design is model misspecification.  When you misspecify the statistical model, you are likely to get biased estimates of the treatment effect. For instance, if the true model is curved or in other words we have a quadratic distribution and we try to fit a straight-line regression, we might estimate a treatment effect, when there is none. This is shown in the screenshot of the lecture included below:
+
+```{r}
+knitr::include_graphics("slides_rdd (1).png")
+```
+Compared to the orginal regression the treatment effect has increased (or more specifically said has a higher negative effect) that now equals -0.016 and is still statistically significant at the 5%-level. However the quadratic terms (Diff_weightsq and Interactionsq) do not seem to be statistically signifcant which implies that the functional term is not actually quadratic. Therefore, this might lead to overspecification of the model, which would lead to a higher standard error (has increased to 0.0076) and inefficiency.
+
+## c) Optimal BWs according to Calonico et al. (MSE-optimal bandwidth)
+
+```{r}
+
+summary(rdbwselect(almond$death1year,
+                   almond$Diff_weight, 
+                   c = 0, 
+                   vce = "hc0", 
+                   cluster = almond$Diff_weight,
+                   bwselect = "mserd",
+                   masspoints = "off",
+                   all = T))
+
+```
+
+The optimal symmetric bandwidth (mserd) is 7.834 grams on each side of the 1500 gram cut off.
+The optimal assymmetric bandwidth (mserd) is 21.44 grams on the left and 8.577 grams on the right. 
+
+# Question 5: Discussion of the identification strategy
+
+Internal validity refers to whether one can infer that the treatment or program being investigated caused a change in outcome indicators. Internal validity is not concerned with our ability to generalize but rather focuses on whether a causal relationship can be demonstrated for the immediate research context.
+
+As mentioned multiple times, a potential threat to validity could occur when another treatment sets in at c<1500g. If this were the case, continuity at the cutoff point would not be given anymore and we might estimate a treatment effect where there is none or overestimate/underestimate this treatment effect. 
+
+Further, in this replication we have estimated a sharp RDD, meaning that we have assumed that if the birthweight < 1500g, the baby receives special treatment. So, the probability of treatment changes from 0 to 1 at the cutoff. However, this does not necessarily have to be the case. Therefore, the treatment effect could be underestimated if we assume every baby weighing less than 1500g receives treatment but they actually do not. This would, therefore, pose a threat to the internal validity. However, this can be delegated in fuzzy rdd. In fuzzy designs, the probability of treatment is discontinuous at the cutoff, but not to the degree of a definitive 0 to 1 jump and the treatment effect is only estimated for compliers. 
+
+There might also be threats to internal validity arising from unaccounted factors such as race, gender, socioeconomic status, time/date of birth. For example, the time of birth 
+determines whether a doctor is present or only on call, as is the case during the night, which could affect the quality of treatment received. However, some but not all of these factors have been accounted for as described on page 602 under newborn characteristics. 

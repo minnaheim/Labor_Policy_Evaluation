@@ -1,0 +1,392 @@
+---
+title: 'Replication 2: DiD'
+author: "Amelia Hund & Minna Heim"
+date: "2023-03-14"
+output: html_document
+---
+
+############################################
+# REPLICATION 2: Difference in Differences #
+############################################
+
+
+### Preparations
+
+```{r, echo = FALSE}
+# Packages (install first if necessary)
+
+# Load packages
+library(tidyverse) # Data manipulation
+library(broom)     # Modeling output
+library(sandwich)  # Cluster-robust standard errors for regression
+library(lmtest)    # Diagnostics in linear regression models
+library(ggplot2)  # Visual representation of the data
+library(dplyr)
+library(kableExtra)
+```
+
+
+```{r}
+# Load data
+card <- 
+  read_csv("Card_Krueger_AER_1994_data.csv", show_col_types = FALSE) %>%
+  mutate(state = fct_relevel(state, "Pennsylvania", after = 0))
+
+summary(card)
+```
+
+
+# Question 1: Implementation of the minimum wage
+
+On April 1, 1992, New Jersey’s minimum wage rose from $4.25 to $5.05 per hour. The data set contains establishment-level information on 410 fast-food restaurants in both New Jersey and Pennsylvania.
+
+## a) Distribution of starting wage rates before MW (by state)
+
+Produce one figure showing the distribution of starting wage rates by state before the MW
+increase (February 1992).
+
+```{r}
+# rounding the values in the starting wage column, so that our bin size replicates the one in the study more closely
+card$wage_st <- round(card$wage_st/.05)*.05
+
+#trying to do this with bar chart: 
+df_plot_1 <- card %>%
+             filter(after == 0) %>%
+             group_by(state, wage_st) %>%
+             summarise(total_count = n(), .groups = "drop_last") %>%
+             mutate(percent = total_count / sum(total_count))
+             
+head(df_plot_1)  
+
+x <- seq(from = 4.25, to = 5.55, by = 0.1)
+
+plot_1  <-  df_plot_1 %>% 
+            ggplot(aes(x = wage_st, y = percent, fill = state)) +
+            geom_bar(position = "dodge", stat = "identity", width = 0.03) +
+            labs(title = "Distribution of Starting Wage Rates", subtitle = "February 1992", x = "Starting Wage ($ per Hour)", y = "Percentage of Stores") +
+            scale_x_continuous(breaks = x, limits = c(4.20, 5.55))
+plot_1
+
+```
+
+
+
+## b) Distribution of starting wage rates after MW (by state)
+```{r}
+#trying to do this with bar chart:
+df_plot_2 <- card %>%
+             filter(after == 1) %>%
+             group_by(state, wage_st) %>%
+             summarise(total_count = n(), .groups = "drop_last") %>%
+             mutate(percent = total_count / sum(total_count))
+
+x <- seq(from = 4.25, to = 5.55, by = 0.1)
+
+plot_2  <-  df_plot_2 %>% 
+            ggplot(aes(x = wage_st, y = percent, fill = state)) +
+            geom_bar(position = position_dodge(), stat = "identity", width = 0.03) +
+            labs(title = "Distribution of Starting Wage Rates", subtitle = "November 1992", x = "Starting Wage ($ per Hour)", y = "Percentage of Stores") +
+            scale_x_continuous(breaks = x, limits = c(4.25, 5.55))
+plot_2
+```
+
+
+## c) Conclusion
+
+Bar plots 1 and 2 show the distributions of starting wages in the two states before and after the rise. 
+
+In wave 1, the distributions of starting wages in New Jersey and Pennsylvania were very similar. By wave 2, however, virtually all restaurants in New Jersey that had been paying less than 5.05 dollars per hour reported a starting wage equal to the new rate. We can see this in bar plot 2. Almost all fast-food restaurants that previously paid less than the new minimum wage of 5.05 dollars per hour now shifted to the right and chose to pay the minimum wage (except for one restaurant, see below). We can see this in the large increase of the relative frequency of fast-food restaurants in New Jersey now paying 5.05 to 5.15 dollars per hour. Therefore, it seems as if the minimum wage increase was implemented successfully.
+
+
+```{r}
+# Search for stores that did not implement the minimum wage increase:
+no_mw <- card %>%
+  filter(state == "New Jersey") %>%
+  filter(after == 1) %>%
+  filter(wage_st < 5.05)
+
+head(no_mw)
+```
+
+Through this small chunk of code, we see that only one store did not implement the minimum wage increase.
+
+
+# Question 2: Descriptive statistics 
+
+## a) Wave 1 (before MW increase)
+
+###(The test of equaltiy of means for a and b is included in c!)
+
+The first step is to analyze the key variables from a descriptive perspective. For this question, focus
+exclusively on the following four variables: FTE employment, starting wage, price of full meal,
+and hours open.
+
+Consider the first wave only (before the MW increase). Prepare a table with mean values of
+the four variables by state. Perform a test of equality of means between the two states. 
+
+
+```{r}
+D <- card %>%
+  mutate(fte = empft + nmgrs + 0.5 * emppt) %>%
+  mutate(fullmeal = psoda + pfry + pentree)
+
+D
+
+j1 <- D %>%
+  filter(after == 0) %>%
+  filter(state == "New Jersey") 
+  
+
+p1 <- D %>%
+  filter(after == 0) %>%
+  filter(state == "Pennsylvania") 
+  
+
+j2 <- D %>%
+  filter(after == 1) %>%
+  filter(state == "New Jersey")
+  
+
+p2 <- D %>%
+  filter(after ==1) %>%
+  filter(state == "Pennsylvania")
+  
+
+wave1 <- matrix (data = c(mean(j1$fte, na.rm = TRUE),  
+                          mean(j1$wage_st, na.rm = TRUE), 
+                          mean(j1$fullmeal, na.rm = TRUE), 
+                          mean(j1$hrsopen, na.rm = TRUE),
+                          mean(p1$fte, na.rm = TRUE),  
+                          mean(p1$wage_st, na.rm = TRUE), 
+                          mean(p1$fullmeal, na.rm = TRUE), 
+                          mean(p1$hrsopen, na.rm =TRUE)), ncol = 2)
+
+Wave1 <- as.data.frame(wave1)
+
+
+colnames(Wave1) <-  c("New Jersey Averages", "Pennsylvania Averages")
+rownames(Wave1) <- c("FTE", "Starting Wage", "Full Meal",  "Hours Open")
+
+
+Wave1_fin <- Wave1 %>% 
+  kbl(digits=3) %>% 
+  kable_minimal()
+
+Wave1_fin
+
+```
+
+
+## b) Wave 2 (after MW increase)
+
+```{r}
+Wave2 <- as.data.frame(matrix(data = c(mean(j2$fte, na.rm = TRUE),  
+                                       mean(j2$wage_st, na.rm = TRUE), 
+                                       mean(j2$fullmeal, na.rm = TRUE), 
+                                       mean(j2$hrsopen, na.rm = TRUE),
+                                       mean(p2$fte, na.rm = TRUE), 
+                                       mean(p2$wage_st, na.rm = TRUE),  
+                                       mean(p2$fullmeal, na.rm = TRUE),  
+                                       mean(p2$hrsopen, na.rm = TRUE)), ncol = 2))
+
+colnames(Wave2) <-  c("New Jersey Averages", "Pennsylvania Averages")
+rownames(Wave2) <- c("FTE",  "Starting Wage", "Full Meal", "Hours Open")
+
+Wave2 %>% 
+  kbl(digits=3) %>% 
+  kable_minimal()
+```
+
+
+```{r}
+# calculating percentage increase of starting wage: (we refer to this in our conclusion)
+  (5.081-4.614)/4.614
+```
+
+
+## c) Differences between NJ and PA
+
+### Wave 1:
+
+```{r}
+#testing for significance 
+#Wave 1: 
+
+t1 <- t.test(fte      ~ state, data = filter(D, after == 0))
+t1
+
+t2 <- t.test(wage_st  ~ state, data = filter(D, after == 0))
+t2
+
+t3 <- t.test(fullmeal ~ state, data = filter(D, after == 0)) #H0 rejected 
+t3
+
+t4 <- t.test(hrsopen  ~ state, data = filter(D, after == 0))
+t4
+
+
+
+ttests <- map_df(list(t1, t2, t3, t4), tidy)
+ttests
+
+ttests = subset(ttests, select =c("estimate", "statistic", "p.value", "conf.low", "conf.high"))
+
+ttests_df <- as.data.frame(ttests)
+
+rownames(ttests_df)<- c("FTE", "Minimum Wage", "Price of Full meal", "Hours open")
+
+ttests_df %>% 
+  kbl %>% 
+  kable_minimal()
+
+```
+
+According to the results of the t tests above, only the difference in prices for a meal by state is statistically significant at the 0.1, 0.05, and 0.01-significance levels. This is inferred from the p-value of 0.0001038. We can, therefore, discard the zero hypothesis that the difference in means of New Jersey averages for prices of a meal (3.36) and Pennsylvania averages for prices of a meal (3.01) in wave 1 is actually equal to 0. Apparently there seems to be some type of individual fixed effect in the separate states that influence the prices of meals.
+
+We should also mention that the difference in means of full time employment (fte)  between New Jersey (20.42) and Pennsylvania (23.24) is statistically significant at the 0.1 - significance level. We can infer this from the p-value of 0.0584994. 
+
+### Wave 2: 
+
+```{r}
+#Wave 2: 
+
+
+tt1<- t.test(fte      ~ state, data = filter(D, after == 1))
+tt2<- t.test(wage_st  ~ state, data = filter(D, after == 1)) #rejected
+tt3<- t.test(fullmeal ~ state, data = filter(D, after == 1)) #rejected 
+tt4<- t.test(hrsopen  ~ state, data = filter(D, after == 1))
+
+tt1
+tt2
+tt3
+tt4
+
+ttests2 <- map_df(list(tt1, tt2, tt3, tt4), tidy)
+
+ttests2
+
+ttests2 = subset(ttests2, select =c("estimate", "statistic", "p.value", "conf.low", "conf.high"))
+
+ttests2_df <- as.data.frame(ttests2)
+rownames(ttests2_df)<- c("FTE", "Minimum Wage", "Price of Full meal", "Hours open")
+
+
+
+ttests2_df %>% 
+  kbl %>% 
+  kable_minimal()
+```
+
+According to the p-values of the t tests above, the difference in means of the minimum wages (p-value: 2.2e-16) and the difference in means of price of full meals between New Jersey and Pennsylvania (p-value: 1.333e-06) are statistically significant at the 0.1, 0.05, and 0.01 - significance levels during wave 2.
+
+
+CONCLUSION AND DISCUSSION OF THREAT TO VALIDITY:
+
+In wave 1, average employment was 23.395 full-time equivalent workers per store in Pennsylvania, compared with an average of 20.595 in New Jersey. Starting wages were very similar among stores in the two states, although the average price of a "full meal" (medium soda, small fries, and an entree) was significantly higher in New Jersey. There were no significant cross-state differences in average hours of operation.
+
+The average starting wage at fast-food restaurants in New Jersey increased by 10 percent (refer to 2b) following the rise in the minimum wage. Further insight into this change is provided in Figure 1 (exercise 1), which shows the distributions of starting wages in the two states before and after the rise. As stated previously, in wave 1, the distributions in New Jersey and Pennsylvania were very similar. By wave 2 virtually all restaurants in New Jersey that had been paying less than $5.05 per hour reported a starting wage equal to the new rate. 
+
+Despite the increase in wages, full-time- equivalent employment increased in New Jersey relative to Pennsylvania. Whereas New Jersey stores were initially smaller, employment gains in New Jersey coupled with losses in Pennsylvania led to a small and statistically insignificant interstate difference in wave 2.
+
+In the absence of treatment, so wave 1, treatment and control groups may differ. However, what is important is not that the difference in means between New Jersey and Pennsylvania is statistically insignificant, but rather, that they move in parallel. This pattern opens the door to DiD estimation of causal effects. The whole reason for the DiD approach is that we compare changes in differences of means instead of levels, thus, eliminating fixed differences between groups that might otherwise generate omitted variable bias. Hence, Difference-in-difference is a useful technique to use when randomization on the individual level is not possible. The approach removes biases in post-intervention period comparisons between the treatment and control group that could be the result from permanent differences between those groups, as well as biases from comparisons over time in the treatment group that could be the result of trends due to other causes of the outcome.
+
+The identifying assumption thereby is parallel trends. 
+The assumption of parallel trends can also be expressed as: $$E(Y_{02} - Y_{01}|D = 1) = E(Y_{02} - Y_{01}|D = 0)$$. 
+Only if this assumption holds, we can approximate the selection affect $$E(Y_{02}|D=1) - E(Y_{02}|D=0)$$ in the second period prima facie contrast before treatment via the difference in observed means of $Y_1$ for D = 1 and D = 0 (treated and non-treated): $$E(Y_{01}|D=1) - E(Y_{01}|D=0) = E(Y_1|D=1) - E(Y_1|D=0)$$. We then subtract this selection effect from the difference in observed means of $Y_2$ for D = 1 and D = 0: $E(Y_2|D=1) - E(Y_2|D=0)$. The DiD estimator is then $$E(Y_2|D=1) - E(Y_2|D=0)-[E(Y_1|D=1)-E(Y_1|D=0)] = E(Y_{12} - Y_{02}|D=1)$$. This identifies the ATET if the time trend in the non-treated outcome is independent of the treatment. 
+
+Based on our explanation preceding the deep dive into the theory, these differences do not pose a threat to the validity in the DiD framework.
+
+
+We could already calculate the DiD manually using tables Wave1 and Wave2 in exercise 2b. 
+```{r}
+#manual calculation of difference in fte of control state Pennsylvania between wave 2 and 1:
+23.395 - 21.444
+
+#manual calculation of difference in fte of treatment state New Jersey between wave 2 and 1:
+20.595 - 21.362
+
+#subtract differences 
+(23.395 - 21.444)-(20.595 - 21.362)
+```
+
+In the following exercise we see, that we get the same result using a simple DiD regression.
+
+
+# Question 3: Estimation of the effect via DiD
+
+## a) Estimate a simple DiD model without covariates and use robust SEs
+
+
+```{r}
+#Create a dummy variable to identify the group exposed to the treatment. We assume New Jersey was treated (=1)
+D$treated = ifelse(D$state == "New Jersey",1, 0)
+
+#Create an interaction between time ( variable = after) and treated. We will call this interaction did.
+D$did = D$treated*D$after
+
+D
+```
+
+```{r}
+didreg = lm(fte ~ treated + after + did, data = D) %>%
+  coeftest(vcov = vcov, type ="HC0")
+
+tidy(didreg, conf.int = TRUE)
+
+```
+
+
+
+```{r}
+didregrobust <- lm(fte ~ treated + after + did, data = D)
+
+robust <- function(mod) { 
+  
+  # Compute cluster-robust SE and shorten model output
+  coeftest(mod, vcov = vcovCL, cluster = ~ treated, type = "HC0") %>%
+    broom::tidy() %>%
+    filter(str_detect(term, "treated", negate = TRUE))
+}
+
+col1 <- robust(didregrobust)
+col1
+```
+
+The coefficient for ‘did’ is the differences-in-differences
+estimator. Treatment, so increasing the minimum wage in New Jersey to 5.05 dollars per hour, seemingly has an effect of increasing full time employment (fte) by 2.718. Clustering for the chains within states, we have a standard error of 1.242. With a p-value of 2.899874e-02, this estimate is statistically significant at levels of 0.1, 0.05, 0.01.
+
+Therefore, we find that the increase in the minimum wage increased employment which is contradictory to the central prediction of the textbook model of the minimum wage, that a rise in New Jersey's minimum wage would reduce employment at fast-food restaurants in the state.
+
+## b) Elasticity
+
+```{r}
+Datamodel <- D %>%
+  select(treated, after, did)
+Datamodel
+```
+```{r}
+didreg1 = lm(fte ~ treated + after + did, data = D)
+y_hat <- predict(didreg1, newdata = Datamodel)
+head(y_hat)
+mean(y_hat)
+```
+
+```{r}
+#D$did
+#y_hat
+beta_hat <- col1[3,2]
+elasticity <- beta_hat* mean((D$did/y_hat), na.rm = TRUE)
+elasticity
+```
+
+The estimated elasticity of employment with respect to the minimum wage increase is 0.0511. This means that if the minimum wage is increased by 1%, then the fte is increased by roughly 0.0511%. This is extremely inelastic and therefore, not economically significant, since fte is not affected significantly from variation in the minimum wage. In simple words, there is less change in fte due to minimum wage fluctuation.
+
+# Question 4: Discussion of the identification strategy
+
+
+In the case at hand, Card & Krueger's identification strategy leverages a difference in difference design. Internal validity can be defined as the degree of confidence that the causal relationship we have tested is not influenced by other factors or variables. Therefore, as previously explained in exercise 2, the identifying assumption thereby is parallel trends. If this assumption does not hold, there are threats to internal validity (for a more in-depth explanation of this theory please refer back to exercise 2c.)
+
+Possible threats to internal validity could for instance include demand shocks in New Jersey: If this were the case, one could argue that even in the absence of treatment, full time employment could increase in New Jersey due to a positive demand shock. Other threats to internal validity could include seasonal employment effect. However, since seasonal patterns of employment are similar in New Jersey and eastern Pennsylvania, the comparative methodology effectively "differences out" any seasonal employment effects. Furthermore, the authors of the study also included wage variation across stores in New Jersey, which allowed them to compare experiences of high-wage and low-wage stores within New Jersey and to test the validity of the Pennsylvania control group, thus removing the effect of any demand shocks.
+
+Another possible threat to internal validity is: workers switch from part-time to full-time positions at lower wage restaurants; are thus, weighted more strongly (0.5 to 1) and consequently increase fte, however, this switch may not be due to the wage increase. 
+
